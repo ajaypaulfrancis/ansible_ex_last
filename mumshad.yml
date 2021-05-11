@@ -1,0 +1,323 @@
+3]
+
+We have php, nginx and mariadb installed on node02 and have a DB mydb created there. The user to connect to DB is myuser and password is mypassword. Create a playbook ~/playbooks/database.yml to perform below given tasks:
+
+
+a. Start nginx and mariadb services.
+
+b. Delete all default files/directories from nginx document root /usr/share/nginx/html/
+
+c. Download a zip archive from https://github.com/inderpreetaps/ansible-1100-mock-nginx/raw/master/index.php.zip and extract it in /usr/share/nginx/html/
+
+d. The archive have an index.php file to check DB connectivity. Replace some required DB details in the file using replace or lineinfile module:
+
+$database = "database"; to $database = "mydb";
+
+$username = "user"; to $username = "myuser";
+
+$password = "password"; to $password = "mypassword";
+
+e. Restart nginx after making required changes.
+
+
+
+---
+- hosts: node02
+  tasks:
+    - name: Start service nginx
+      service:
+        name: "{{ item }}"
+        state: started
+      with_items:
+        - nginxvim 
+        - mariadb
+    
+    - name: clean nginx document root
+      shell: rm -rf /usr/share/nginx/html/*
+        
+    - name: download zip
+      unarchive: 
+        src: https://github.com/inderpreetaps/ansible-1100-mock-nginx/raw/master/index.php.zip
+        dest: /usr/share/nginx/html/
+        remote_src: yes
+        
+    - name: Update DB details
+      replace:
+        path: /usr/share/nginx/html/index.php
+        regexp: '{{ item.1 }}'
+        replace: '{{ item.2 }}'
+      with_items:
+        - { 1: '\$database.*', 2: '$database = "mydb";' }
+        - { 1: '\$username.*', 2: '$username = "myuser";' }
+        - { 1: '\$password.*', 2: '$password = "mypassword";' }
+    
+    - name: restart Nginx
+      service:
+        name: nginx
+        state: restarted
+
+
+ 1}
+ ---
+- hosts: node00
+  gather_facts: no
+  vars:
+    admin_pass: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          31633039336437396632343337313132623437343231643661383933383865333661343938356662
+          3164343764363936313231356362633536386138613436380a316366313862653163346239316264
+          31303036323263333663663864306265336461376631663462393034336461616134346261663936
+          6266633664663562320a656333383336366565663238353363613661623262353561616530343637
+          3666
+    developer_pass: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          32373530356562326665666261653432386538626263666431336331653336326133383561346631
+          6131313166653033383661663637396439393633666137360a356431656265306635393338626537
+          61653037353865623635333935386339366438643137316366663739623630306535326537333432
+          3937323535363234630a373863373564383433623330323138613035666331363739363532623064
+          6631
+  tasks:
+    - name: Include user.yml
+      include_vars:
+        file: data/users.yml
+    - name: Creating admins
+      user:
+        name: "{{ item }}"
+        password: "{{ admin_pass | string | password_hash('sha512') }}"
+        groups: wheel
+      with_items: "{{ admins | list }}"
+
+    - name: creating developers
+      user:
+        name: "{{ item }}"
+        password: "{{ developer_pass | string | password_hash('sha512') }}"
+        home: /var/www
+      with_items: "{{ developers | list }}"
+
+  1.a]
+  admins:
+  - rob
+  - david
+  - joy
+
+developers:
+  - tim
+  - ray---
+
+2]
+
+- hosts: node01
+  tasks:
+    - name: remove httpd and php packages
+      yum:
+        name: httpd, php
+        state: present
+
+    - name: Create doc root
+      file:
+        path: /var/www/html/myroot
+        state: directory
+        owner: apache
+        group: apache
+
+    - name: change document root
+      replace:
+        path: /etc/httpd/conf/httpd.conf
+        regexp: 'DocumentRoot "/var/www/html"'
+        replace: 'DocumentRoot "/var/www/html/myroot"'
+    
+    - name: copy template
+      template:
+        src: phpinfo.php.j2
+        dest: /var/www/html/myroot/phpinfo.php
+        owner: apache
+        group: apache
+
+    - name: Start service httpd
+      service:
+        name: httpd
+        state: started
+        enabled: yes
+    
+    - name: open port httpd
+      firewalld:
+        port: 80/tcp
+        state: enabled
+        zone: public
+        permanent: yes
+
+  
+
+  4.] Create a playbook facts.yml under ~/playbooks directory on Ansible controller. In this playbook using blockinfile module create a file facts.txt under /root on node02 host and add below given block in it. You will need to enable facts gathering for this task.
+
+This is Ansible managed node `<hostname-of-host> `
+IP address of host is `<ip-address-of-host>`
+Its OS family is `<os-family>`
+After that make a copy of this file as index.html under /usr/share/nginx/html/
+
+
+---
+- hosts: node02
+  gather_facts: yes
+  tasks:
+    - name: Create facts.txt
+      blockinfile:
+        path: /root/facts.txt
+        create: yes
+        block: |
+          This is Ansible managed node {{ ansible_nodename }}
+          IP address of host is {{ ansible_default_ipv4.address }}
+          Its OS family is {{ ansible_os_family }}
+          
+    - name: Make index.html
+      copy:
+        src: /root/facts.txt
+        remote_src: yes
+        dest: /usr/share/nginx/html/index.html
+
+
+
+
+
+
+
+- name: Install Jenkins
+  hosts: node01
+  pre_tasks:
+    - name: Install java
+      yum:
+        name: java
+        state: present
+  roles:
+  - role: geerlingguy.jenkins
+    vars:
+      jenkins_http_port: 8082
+
+
+      thor@ansible-controller ~$ cat /tmp/hassets/answers/storage_mount.yml 
+- hosts: node01
+  tasks:
+  - name: create filesystem
+    filesystem:
+      fstype: ext4
+      dev: /dev/vg_os/lv_os
+
+- hosts: node01
+  tasks:
+  - name: mount fs
+    mount:
+      name: /mnt/os_data
+      src: /dev/vg_os/lv_os         
+      fstype: ext4
+      state: mounted
+thor@ansible-controller ~$ cat /tmp/hassets/answers/storage_volume.yml 
+- hosts: node01
+  tasks:
+  - name: create vg
+    lvg: 
+      vg: vg_os
+      pvs: /dev/vdb1
+      
+- hosts: node01 
+  tasks:
+    - name: create logical volume
+      lvol:
+        vg: vg_os
+        lv: lv_os
+        size: 500M
+thor@ansible-controller ~$ 
+
+
+Write a playbook: ~/playbooks/add_user_with_ssh.yml to create a user: deploy on remote hosts. Its a best practice to ssh using public-key than to use a plain password. Copy the public key: ~/playbooks/devops.pub to remote hosts inside deploy user you just created.
+
+Use inventory file: ~/playbooks/inventory.
+
+
+
+
+
+
+---
+- hosts: all
+  tasks:
+    - user:
+        name: deploy
+        state: present
+    - authorized_key:
+        user: deploy
+        key: "{{ lookup('file', 'devops.pub') }}"
+        state: present
+
+
+In Linux system, it is recommended to allocate swap. It has many benefits as it helps the operating system to dump the least frequently used memory pages there and protects services from the OOM killed.
+
+The preference of Linux kernel to push something to swap is governed by the sysctl parameter vm.swappiness. It can vary from 0 to 100 with default (60) and represents the percentage of the free memory before activating swap. Lower value means less likely kernel's preference to use swap.
+
+The system node01 provided to you in inventory:/home/thor/playbooks/inventory has a default swappiness value (60).
+
+
+Write a playbook /home/thor/playbooks/configure_swap.yml to and set vm.swappiness=10 to improve the performance when sufficient memory exists on the system.
+
+
+
+
+Write a playbook /home/thor/playbooks/install_from_source.yml that installs a tool: mosh from source:https://github.com/mobile-shell/mosh on all servers. List of all servers is listed in the inventory /home/thor/playbooks/inventory.
+
+A normal install from source flow is:
+
+git clone https://github.com/mobile-shell/mosh
+cd mosh
+./autogen.sh
+./configure
+make && make install
+
+To compile mosh from source, you need these dependencies:
+
+git
+make
+autoconf
+automake
+protobuf-devel
+libutempter-devel
+ncurses-devel
+openssl-devel
+gcc
+gcc-c++
+
+
+
+
+
+
+
+
+---
+- hosts: all
+  tasks:
+    - package:
+        name: "{{ item }}"
+        state: present
+      with_items:
+        - git
+        - make
+        - autoconf
+        - automake
+        - protobuf-devel
+        - libutempter-devel
+        - ncurses-devel
+        - openssl-devel
+        - gcc
+        - gcc-c++
+    - git:
+        repo: https://github.com/mobile-shell/mosh
+        dest: /tmp/mosh
+        force: yes
+    - shell: ./autogen.sh && ./configure && make && make install
+      args:
+        chdir: /tmp/mosh
+
+
+ ---
+- hosts: node01
+  tasks:
+   - shell: sysctl vm.swappiness=10       
